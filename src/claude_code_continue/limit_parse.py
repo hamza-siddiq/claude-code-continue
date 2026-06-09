@@ -28,6 +28,13 @@ class SessionLimit:
     matched_text: str
 
 
+def _as_naive_local(dt: datetime) -> datetime:
+    """Convert an aware datetime to naive local time for scheduling."""
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone().replace(tzinfo=None)
+
+
 def _to_24h(hour: int, ampm: str) -> int:
     ampm = ampm.lower()
     if ampm == "pm" and hour != 12:
@@ -82,7 +89,7 @@ def parse_session_limit(
         candidate += timedelta(days=1)
 
     return SessionLimit(
-        reset_at_local=candidate.astimezone(),
+        reset_at_local=_as_naive_local(candidate),
         reset_at_source=candidate,
         timezone_name=tz_name.strip() if tz_name else None,
         matched_text=line,

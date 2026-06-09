@@ -23,6 +23,7 @@ class ParseSessionLimitTests(unittest.TestCase):
         self.assertEqual(result.reset_at_source.minute, 28)
         self.assertEqual(result.reset_at_local.hour, 14)
         self.assertEqual(result.reset_at_local.minute, 28)
+        self.assertIsNone(result.reset_at_local.tzinfo)
 
     def test_parse_without_minutes(self) -> None:
         text = "You've hit your session limit · resets 3pm (Asia/Karachi)"
@@ -61,6 +62,13 @@ class ParseSessionLimitTests(unittest.TestCase):
         self.assertIsNotNone(line)
         assert line is not None
         self.assertIn("session limit", line)
+
+    def test_reset_at_local_subtracts_from_now(self) -> None:
+        text = "You've hit your session limit · resets 2:28pm (Asia/Karachi)"
+        now = datetime(2026, 6, 9, 12, 0, tzinfo=ZoneInfo("Asia/Karachi"))
+        result = parse_session_limit(text, now=now)
+        remaining = (result.reset_at_local - datetime.now()).total_seconds()
+        self.assertIsInstance(remaining, float)
 
     def test_missing_limit_raises(self) -> None:
         with self.assertRaises(ValueError):

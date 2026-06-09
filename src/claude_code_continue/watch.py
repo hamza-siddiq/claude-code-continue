@@ -67,8 +67,10 @@ def print_detect_result(result: DetectResult) -> None:
     print(f"Found session limit in {result.tab.label}")
     print(f"  Message: {result.matched_text}")
     if result.timezone_name:
-        print(f"  Reset: {result.run_at.astimezone().strftime('%Y-%m-%d %I:%M %p %Z')} "
-              f"(from {result.timezone_name})")
+        print(
+            f"  Reset: {result.run_at.strftime('%Y-%m-%d %I:%M %p')} "
+            f"(from {result.timezone_name})"
+        )
     else:
         print(f"  Reset: {result.run_at.strftime('%Y-%m-%d %I:%M %p')}")
 
