@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-code-continue"
+version = "0.1.0"
+description = "Automatically send continue in Claude Code (Terminal.app) when session limits reset."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+claude-code-continue = "claude_code_continue.cli:main"
+ccc = "claude_code_continue.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
