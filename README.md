@@ -112,7 +112,9 @@ Without Accessibility, System Events cannot send keystrokes. Without Automation,
    ```bash
    claude-code-continue watch
    ```
-3. The tool finds the limited tab, waits until the reset time, and types `continue`.
+3. The tool finds the limited tab, waits until the reset time, switches to that tab, and types `continue`.
+
+**Tip:** Run `ccc watch` from a **different** Terminal tab (or iTerm/Cursor) than the one running Claude Code. If keystrokes land in your shell instead of Claude Code, you may see `continue: not in while, until, select, or repeat loop` — that means the wrong tab received the input.
 
 ### Commands
 

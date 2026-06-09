@@ -85,6 +85,9 @@ def send_continue_with_retries(tab: TerminalTab) -> int:
 
         print(f"Sending continue (attempt {attempt}/{CONTINUE_ATTEMPT_COUNT})...")
         try:
+            # Re-find the tab in case windows were reordered while waiting.
+            tab, _ = find_limit_tab()
+            print(f"Targeting {tab.label}")
             send_continue(tab)
             if attempt > 1:
                 print(f"Succeeded on attempt {attempt}.")

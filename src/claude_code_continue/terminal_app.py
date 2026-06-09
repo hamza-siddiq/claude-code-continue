@@ -12,18 +12,21 @@ from claude_code_continue.limit_parse import (
     parse_session_limit,
 )
 
+# Let Terminal finish switching tabs before System Events sends keystrokes.
+FOCUS_DELAY_SECONDS = 0.6
+
 
 @dataclass(frozen=True)
 class TerminalTab:
     """A Terminal.app window/tab pair."""
 
-    window_index: int
+    window_id: int
     tab_index: int
     contents: str
 
     @property
     def label(self) -> str:
-        return f"window {self.window_index}, tab {self.tab_index}"
+        return f"window id {self.window_id}, tab {self.tab_index}"
 
 
 class TerminalAppError(RuntimeError):
@@ -42,21 +45,18 @@ def _run_applescript(script: str) -> str:
     return proc.stdout
 
 
-def _list_tab_indices() -> list[tuple[int, int]]:
-    """List window/tab indices using numeric iteration.
-
-    Terminal.app does not support ``index of t`` when iterating tab objects,
-    and some windows may fail with AppleEvent handler errors — those are skipped.
-    """
+def _list_tab_refs() -> list[tuple[int, int]]:
+    """Return (window_id, tab_index) for every readable Terminal tab."""
     script = '''
 tell application "Terminal"
     set output to ""
     repeat with w from 1 to count of windows
         try
+            set wid to id of window w
             set tabCount to count of tabs of window w
             repeat with t from 1 to tabCount
                 try
-                    set output to output & (w as string) & "," & (t as string) & linefeed
+                    set output to output & (wid as string) & "," & (t as string) & linefeed
                 end try
             end repeat
         end try
@@ -65,20 +65,20 @@ tell application "Terminal"
 end tell
 '''
     raw = _run_applescript(script)
-    indices: list[tuple[int, int]] = []
+    refs: list[tuple[int, int]] = []
     for line in raw.splitlines():
         line = line.strip()
         if not line:
             continue
-        window_index, tab_index = line.split(",", 1)
-        indices.append((int(window_index), int(tab_index)))
-    return indices
+        window_id, tab_index = line.split(",", 1)
+        refs.append((int(window_id), int(tab_index)))
+    return refs
 
 
-def _get_tab_contents(window_index: int, tab_index: int) -> str | None:
+def _get_tab_contents(window_id: int, tab_index: int) -> str | None:
     script = f'''
 tell application "Terminal"
-    return contents of tab {tab_index} of window {window_index}
+    return contents of tab {tab_index} of window id {window_id}
 end tell
 '''
     proc = subprocess.run(
@@ -94,13 +94,13 @@ end tell
 def scan_tabs() -> list[TerminalTab]:
     """Return scrollback contents for every Terminal.app tab."""
     tabs: list[TerminalTab] = []
-    for window_index, tab_index in _list_tab_indices():
-        contents = _get_tab_contents(window_index, tab_index)
+    for window_id, tab_index in _list_tab_refs():
+        contents = _get_tab_contents(window_id, tab_index)
         if contents is None:
             continue
         tabs.append(
             TerminalTab(
-                window_index=window_index,
+                window_id=window_id,
                 tab_index=tab_index,
                 contents=contents,
             )
@@ -130,7 +130,7 @@ def focus_tab(tab: TerminalTab) -> None:
     script = f'''
 tell application "Terminal"
     activate
-    set targetWindow to window {tab.window_index}
+    set targetWindow to window id {tab.window_id}
     set index of targetWindow to 1
     set selected of tab {tab.tab_index} of targetWindow to true
 end tell
@@ -140,8 +140,18 @@ end tell
 
 def send_continue(tab: TerminalTab) -> None:
     """Focus the tab and type continue + Return at the Claude Code prompt."""
-    focus_tab(tab)
-    script = '''
+    # Single AppleScript block: select tab, wait for focus, then type.
+    # Separate calls allowed keystrokes to land in the watcher's shell tab.
+    script = f'''
+tell application "Terminal"
+    activate
+    set targetWindow to window id {tab.window_id}
+    set index of targetWindow to 1
+    set selected of tab {tab.tab_index} of targetWindow to true
+end tell
+
+delay {FOCUS_DELAY_SECONDS}
+
 tell application "System Events"
     tell process "Terminal"
         set frontmost to true
