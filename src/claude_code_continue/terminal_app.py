@@ -43,16 +43,25 @@ def _run_applescript(script: str) -> str:
 
 
 def _list_tab_indices() -> list[tuple[int, int]]:
+    """List window/tab indices using numeric iteration.
+
+    Terminal.app does not support ``index of t`` when iterating tab objects,
+    and some windows may fail with AppleEvent handler errors — those are skipped.
+    """
     script = '''
 tell application "Terminal"
-    set pairs to ""
-    repeat with w in windows
-        set widx to index of w
-        repeat with t in tabs of w
-            set pairs to pairs & (widx as string) & "," & (index of t as string) & linefeed
-        end repeat
+    set output to ""
+    repeat with w from 1 to count of windows
+        try
+            set tabCount to count of tabs of window w
+            repeat with t from 1 to tabCount
+                try
+                    set output to output & (w as string) & "," & (t as string) & linefeed
+                end try
+            end repeat
+        end try
     end repeat
-    return pairs
+    return output
 end tell
 '''
     raw = _run_applescript(script)
@@ -66,13 +75,20 @@ end tell
     return indices
 
 
-def _get_tab_contents(window_index: int, tab_index: int) -> str:
+def _get_tab_contents(window_index: int, tab_index: int) -> str | None:
     script = f'''
 tell application "Terminal"
     return contents of tab {tab_index} of window {window_index}
 end tell
 '''
-    return _run_applescript(script)
+    proc = subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
 
 
 def scan_tabs() -> list[TerminalTab]:
@@ -80,6 +96,8 @@ def scan_tabs() -> list[TerminalTab]:
     tabs: list[TerminalTab] = []
     for window_index, tab_index in _list_tab_indices():
         contents = _get_tab_contents(window_index, tab_index)
+        if contents is None:
+            continue
         tabs.append(
             TerminalTab(
                 window_index=window_index,
