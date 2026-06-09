@@ -7,7 +7,7 @@ import sys
 
 from claude_code_continue import __version__
 from claude_code_continue.terminal_app import TerminalAppError
-from claude_code_continue.watch import detect_once, print_detect_result, run_watch
+from claude_code_continue.watch import detect_all, print_detect_results, run_watch
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -61,8 +61,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "detect":
-            result = detect_once()
-            print_detect_result(result)
+            results = detect_all()
+            print_detect_results(results)
             return 0
 
         if args.command == "watch":

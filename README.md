@@ -114,6 +114,8 @@ Without Accessibility, System Events cannot send keystrokes. Without Automation,
    ```
 3. The tool finds the limited tab, waits until the reset time, switches to that tab, and types `continue`.
 
+If more than one tab shows a session-limit message, `ccc watch` asks which reset time to use. It then lists every Claude Code tab so you can choose where to send `continue` — the tab where the limit appeared is always option 1, even if another Claude Code tab never showed the limit message. Run `ccc detect` first to preview active limits.
+
 **Tip:** Run `ccc watch` from a **different** Terminal tab (or iTerm/Cursor) than the one running Claude Code. If keystrokes land in your shell instead of Claude Code, you may see `continue: not in while, until, select, or repeat loop` — that means the wrong tab received the input.
 
 ### Commands
@@ -123,7 +125,7 @@ Without Accessibility, System Events cannot send keystrokes. Without Automation,
 claude-code-continue watch
 ccc watch
 
-# Only print which tab and when it resets
+# List every limited tab and when each resets
 claude-code-continue detect
 
 # Manual reset time (still needs a detectable tab for typing)
@@ -162,9 +164,10 @@ Keep the terminal session alive for long waits — use `nohup` or leave the lid 
 
 | Problem | Fix |
 |---------|-----|
-| No session limit found | Run `watch` soon after the limit appears, before scrollback scrolls away. Use `--poll` if starting early. |
+| No session limit found | Run `watch` soon after the limit appears, before scrollback scrolls away. Use `--poll` if starting early. Only tabs **currently** at a limit are matched; older limit text still in scrollback is ignored. |
 | Keystrokes do nothing | Grant Accessibility + Automation permissions. |
-| Wrong tab selected | Close extra tabs with the same limit message, or run `detect` first to confirm. |
+| Wrong tab selected | `watch` lists all Claude Code tabs for continue; the limit-detected tab is option 1. |
+| Multiple limits, non-interactive run | `watch` via `nohup` or a pipe cannot prompt; run it in an interactive terminal to choose a tab. |
 | AppleScript error | Ensure Terminal.app is running and the Claude Code tab is still open. |
 
 ---
