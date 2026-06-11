@@ -43,15 +43,20 @@ class DetectResult:
 
 @dataclass(frozen=True)
 class WatchPlan:
-    """Schedule from a limit tab; continue may target a different tab."""
+    """Schedule from a limit tab; continue may target one or more tabs."""
 
     limit_tab: TerminalTab
     limit: SessionLimit
-    continue_tab: TerminalTab
+    continue_tabs: tuple[TerminalTab, ...]
 
     @property
     def run_at(self) -> datetime:
         return self.limit.reset_at_local
+
+    @property
+    def continue_tab(self) -> TerminalTab:
+        """First continue target (limit tab when it is included)."""
+        return self.continue_tabs[0]
 
 
 def resolve_run_at_from_manual(manual_at: str) -> datetime:
@@ -90,6 +95,36 @@ def _prompt_choice(prompt: str, count: int) -> int:
         print(f"Enter a number between 1 and {count}.")
 
 
+def _parse_multi_choice(raw: str, count: int) -> list[int] | None:
+    """Parse comma-separated 1-based choices; None if invalid."""
+    parts = [part.strip() for part in raw.split(",") if part.strip()]
+    if not parts:
+        return None
+
+    choices: list[int] = []
+    seen: set[int] = set()
+    for part in parts:
+        try:
+            choice = int(part)
+        except ValueError:
+            return None
+        if not 1 <= choice <= count or choice in seen:
+            return None
+        seen.add(choice)
+        choices.append(choice)
+    return choices
+
+
+def _prompt_multi_choice(prompt: str, count: int) -> list[int]:
+    hint = f"{prompt} [1-{count}, comma-separated for multiple]"
+    while True:
+        raw = input(f"{hint}: ").strip()
+        choices = _parse_multi_choice(raw, count)
+        if choices:
+            return choices
+        print(f"Enter one or more numbers between 1 and {count}, separated by commas.")
+
+
 def _choose_from_menu(
     title: str,
     options: list[str],
@@ -109,7 +144,22 @@ def _choose_from_menu(
     print(title)
     for index, option in enumerate(options, start=1):
         print(f"  {index}. {option}")
-    return _prompt_choice("Select tab", len(options))
+    return _prompt_choice("Select option", len(options))
+
+
+def _limits_share_reset_time(
+    candidates: list[tuple[TerminalTab, SessionLimit]],
+) -> bool:
+    """True when every limit schedules continue for the same moment."""
+    if len(candidates) <= 1:
+        return True
+    first = candidates[0][1]
+    for _, limit in candidates[1:]:
+        if limit.reset_at_local != first.reset_at_local:
+            return False
+        if limit.timezone_name != first.timezone_name:
+            return False
+    return True
 
 
 def choose_limit_source(
@@ -120,10 +170,12 @@ def choose_limit_source(
         raise_no_limit_tab_error(scan_tabs())
     if len(candidates) == 1:
         return candidates[0]
+    if _limits_share_reset_time(candidates):
+        return candidates[0]
 
     options = [tab.summary(limit) for tab, limit in candidates]
     choice = _choose_from_menu(
-        "Multiple Claude Code session limits found. Which reset time should be used?",
+        "Multiple session limits with different reset times. Which schedule should be used?",
         options,
         non_tty_error=(
             "Multiple session limits found; run interactively in a terminal to choose a tab."
@@ -132,35 +184,48 @@ def choose_limit_source(
     return candidates[choice - 1]
 
 
-def choose_continue_tab(
+def choose_continue_tabs(
     candidates: list[TerminalTab],
     *,
     limit_tab: TerminalTab,
     limit: SessionLimit,
-) -> TerminalTab:
-    """Pick which tab receives continue. Limit-detected tab is always option 1."""
+    limited_tab_refs: set[tuple[int, int]] | None = None,
+) -> tuple[TerminalTab, ...]:
+    """Pick which tab(s) receive continue. Limit-detected tab is always option 1."""
     if not candidates:
-        return limit_tab
+        return (limit_tab,)
     if len(candidates) == 1:
-        return candidates[0]
+        return (candidates[0],)
 
     reset = _format_reset(limit)
+    limited = limited_tab_refs or {(limit_tab.window_id, limit_tab.tab_index)}
     options: list[str] = []
     for tab in candidates:
-        if tab.window_id == limit_tab.window_id and tab.tab_index == limit_tab.tab_index:
-            options.append(tab.display_label(note=f"limit detected here, resets {reset}"))
+        ref = (tab.window_id, tab.tab_index)
+        if ref == (limit_tab.window_id, limit_tab.tab_index):
+            options.append(tab.display_label(note=f"session limit, resets {reset}"))
+        elif ref in limited:
+            options.append(tab.display_label(note=f"session limit, resets {reset}"))
         else:
             options.append(tab.display_label())
 
-    choice = _choose_from_menu(
-        "Select tab to send continue to:",
-        options,
-        non_tty_error=(
+    if len(options) == 1:
+        return (candidates[0],)
+
+    if not sys.stdin.isatty():
+        print("Select tab(s) to send continue to:", file=sys.stderr)
+        for index, option in enumerate(options, start=1):
+            print(f"  {index}. {option}", file=sys.stderr)
+        raise TerminalAppError(
             "Multiple Claude Code tabs found; run interactively in a terminal to choose "
             "where continue should be sent."
-        ),
-    )
-    return candidates[choice - 1]
+        )
+
+    print("Select tab(s) to send continue to:")
+    for index, option in enumerate(options, start=1):
+        print(f"  {index}. {option}")
+    choices = _prompt_multi_choice("Select tab(s)", len(options))
+    return tuple(candidates[choice - 1] for choice in choices)
 
 
 def resolve_watch_plan(tabs: list[TerminalTab] | None = None) -> WatchPlan:
@@ -171,13 +236,20 @@ def resolve_watch_plan(tabs: list[TerminalTab] | None = None) -> WatchPlan:
         raise_no_limit_tab_error(tabs)
 
     limit_tab, limit = choose_limit_source(limit_matches)
-    continue_candidates = list_continue_targets(tabs, limit_tab=limit_tab)
-    continue_tab = choose_continue_tab(
+    all_limit_tabs = [tab for tab, _ in limit_matches]
+    limited_tab_refs = {(tab.window_id, tab.tab_index) for tab in all_limit_tabs}
+    continue_candidates = list_continue_targets(
+        tabs,
+        limit_tab=limit_tab,
+        limit_tabs=all_limit_tabs,
+    )
+    continue_tabs = choose_continue_tabs(
         continue_candidates,
         limit_tab=limit_tab,
         limit=limit,
+        limited_tab_refs=limited_tab_refs,
     )
-    return WatchPlan(limit_tab=limit_tab, limit=limit, continue_tab=continue_tab)
+    return WatchPlan(limit_tab=limit_tab, limit=limit, continue_tabs=continue_tabs)
 
 
 def detect_all() -> list[DetectResult]:
@@ -213,11 +285,7 @@ def print_watch_plan(plan: WatchPlan) -> None:
     else:
         print(f"  Reset: {plan.run_at.strftime('%Y-%m-%d %I:%M %p')}")
 
-    if (
-        plan.continue_tab.window_id != plan.limit_tab.window_id
-        or plan.continue_tab.tab_index != plan.limit_tab.tab_index
-    ):
-        print(f"Continue will be sent to {plan.continue_tab.display_label()}")
+    _print_continue_targets(plan.continue_tabs)
 
 
 def print_detect_result(result: DetectResult) -> None:
@@ -293,7 +361,7 @@ def run_watch(
             return 1
         print(f"Manual schedule: {run_at.strftime('%Y-%m-%d %I:%M %p')}")
         print(f"Limit detected in {plan.limit_tab.display_label()}")
-        print(f"Continue target: {plan.continue_tab.display_label()}")
+        _print_continue_targets(plan.continue_tabs)
     else:
         plan = detect_with_poll(poll_seconds)
         run_at = plan.run_at
@@ -307,4 +375,25 @@ def run_watch(
         print("Reset time has already passed; sending continue now.")
 
     print("Scheduled time reached.")
-    return send_continue_with_retries(plan.continue_tab)
+    return send_continue_to_tabs(plan.continue_tabs)
+
+
+def _print_continue_targets(tabs: tuple[TerminalTab, ...] | list[TerminalTab]) -> None:
+    if len(tabs) == 1:
+        print(f"Continue will be sent to {tabs[0].display_label()}")
+        return
+    print(f"Continue will be sent to {len(tabs)} tabs:")
+    for tab in tabs:
+        print(f"  - {tab.display_label()}")
+
+
+def send_continue_to_tabs(tabs: tuple[TerminalTab, ...] | list[TerminalTab]) -> int:
+    """Send continue to each tab in order; fail if any tab fails after retries."""
+    exit_code = 0
+    for index, tab in enumerate(tabs, start=1):
+        if len(tabs) > 1:
+            print(f"Tab {index}/{len(tabs)}:")
+        result = send_continue_with_retries(tab)
+        if result != 0:
+            exit_code = result
+    return exit_code

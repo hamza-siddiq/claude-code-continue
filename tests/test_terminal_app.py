@@ -48,6 +48,15 @@ class TerminalTabHelpersTests(unittest.TestCase):
         )
         self.assertFalse(is_claude_code_tab(tab))
 
+    def test_is_claude_code_tab_from_prompt_with_terminal_title(self) -> None:
+        tab = TerminalTab(
+            window_id=1,
+            tab_index=1,
+            contents="some work\n❯ \n",
+            title="Terminal",
+        )
+        self.assertTrue(is_claude_code_tab(tab))
+
     def test_is_claude_code_tab_rejects_ccc_watch_echo(self) -> None:
         tab = TerminalTab(
             window_id=31454,
@@ -84,6 +93,27 @@ class TerminalTabHelpersTests(unittest.TestCase):
         targets = list_continue_targets(
             [other_tab, shell_tab, limit_tab],
             limit_tab=limit_tab,
+        )
+        self.assertEqual([tab.window_id for tab in targets], [100, 200])
+
+    def test_list_continue_targets_includes_all_limit_tabs(self) -> None:
+        limit_tab_a = TerminalTab(
+            window_id=100,
+            tab_index=1,
+            contents="You've hit your session limit · resets 7:20pm\n❯ \n",
+            title="✳ project-a",
+        )
+        limit_tab_b = TerminalTab(
+            window_id=200,
+            tab_index=1,
+            contents="You've hit your session limit · resets 7:20pm\n❯ \n",
+            title="✳ project-b",
+        )
+
+        targets = list_continue_targets(
+            [limit_tab_a, limit_tab_b],
+            limit_tab=limit_tab_a,
+            limit_tabs=[limit_tab_a, limit_tab_b],
         )
         self.assertEqual([tab.window_id for tab in targets], [100, 200])
 

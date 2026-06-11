@@ -220,17 +220,19 @@ _CLAUDE_CODE_SCROLLBACK_MARKERS = (
     "shift+tab to cycle",
     "← for agents",
     "✻ Worked for",
+    "❯",
 )
 
 
 def is_claude_code_tab(tab: TerminalTab) -> bool:
     """Heuristic: tab scrollback or title looks like Claude Code."""
+    if _tab_has_active_session_limit(tab):
+        return True
+
     if tab.title:
         stripped = tab.title.strip()
         if stripped.startswith(("✳", "*")):
             return True
-        if stripped in _SHELL_TAB_TITLES:
-            return False
 
     tail = "\n".join(tab.contents.splitlines()[-80:])
     return any(marker in tail for marker in _CLAUDE_CODE_SCROLLBACK_MARKERS)
@@ -240,10 +242,19 @@ def list_continue_targets(
     tabs: list[TerminalTab],
     *,
     limit_tab: TerminalTab,
+    limit_tabs: list[TerminalTab] | None = None,
 ) -> list[TerminalTab]:
     """Claude Code tabs for continue, with the limit-detected tab first."""
     ordered: list[TerminalTab] = [limit_tab]
     seen = {(limit_tab.window_id, limit_tab.tab_index)}
+
+    for tab in limit_tabs or ():
+        key = (tab.window_id, tab.tab_index)
+        if key in seen:
+            continue
+        ordered.append(tab)
+        seen.add(key)
+
     for tab in tabs:
         key = (tab.window_id, tab.tab_index)
         if key in seen:
